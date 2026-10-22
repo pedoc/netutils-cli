@@ -107,11 +107,18 @@ worse, attributes someone else's bug to your change.
 
 Plugins are **separate child processes**, not linked in. The core resolves
 `netutils-<command>` under the plugin directory first, then `PATH`
-(`src/plugin.rs:755-778`). The plugin directory is `NETUTILS_PLUGIN_DIR`, else
-`~/.netutils/plugins` (`src/plugin.rs:1173-1188`), and a plugin binary lives at
-`<dir>/<plugin>/bin/netutils-<plugin>[.exe]`. `ws` ships two binaries and the
-`websocket` alias maps to the same `ws` plugin directory
-(`external_command_target`, `src/plugin.rs:785-800`).
+(`src/plugin.rs:748-771`). One plugin root is selected per invocation: explicit
+`NETUTILS_PLUGIN_DIR` (used as supplied), else an existing `plugins/` beside the
+running executable (even if empty), else the original
+`USERPROFILE/.netutils/plugins` → `HOME/.netutils/plugins` → `.netutils/plugins`
+fallback (`src/plugin/paths.rs:11-55`). Bundle discovery does not search the
+working directory or ancestors.
+Roots are not merged: a missing plugin may fall back to `PATH`, not another
+managed root. Listing, directory-based execution, install/update/remove and lock
+files use the selected root; write errors do not redirect to the user default.
+A plugin binary lives at `<dir>/<plugin>/bin/netutils-<plugin>[.exe]`. `ws` ships
+two binaries and the `websocket` alias maps to the same `ws` plugin directory
+(`external_command_target`, `src/plugin.rs:778-793`).
 
 Consequence for release packaging: the bundle layout must match that lookup, and
 the plugin list must be **derived** (from `cargo metadata` on the plugins

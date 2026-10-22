@@ -1,5 +1,9 @@
 //! External plugin management and dispatch.
 
+mod install_command;
+mod paths;
+
+use self::paths::plugin_base_dir;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -194,31 +198,20 @@ pub fn install(
     let root = plugin_root(plugin.name);
     let locked = !no_locked;
     let version_request = version.map(str::to_string);
-    let mut command = Command::new("cargo");
-    command.arg("install");
-    if force {
-        command.arg("--force");
-    }
-    if locked {
-        command.arg("--locked");
-    }
-    command.arg("--root").arg(&root);
-
     let explicit_path = path.map(PathBuf::from);
     let (source, source_value) = if let Some(path) = &explicit_path {
         ("path".to_string(), Some(path.display().to_string()))
     } else {
         ("registry".to_string(), Some(plugin.crate_name.to_string()))
     };
-
-    if let Some(path) = explicit_path {
-        command.arg("--path").arg(path);
-    } else {
-        command.arg(plugin.crate_name);
-        if let Some(version) = version {
-            command.arg("--version").arg(version);
-        }
-    }
+    let mut command = install_command::build_install_command(
+        plugin,
+        &root,
+        explicit_path.as_deref(),
+        force,
+        version,
+        locked,
+    );
 
     if mode == OutputMode::Table {
         println!(
@@ -1168,19 +1161,6 @@ fn installed_binary(name: &str, binary: &str) -> Option<PathBuf> {
     };
     let path = plugin_root(name).join("bin").join(exe);
     path.exists().then_some(path)
-}
-
-fn plugin_base_dir() -> PathBuf {
-    env::var_os("NETUTILS_PLUGIN_DIR")
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("USERPROFILE")
-                .map(|home| PathBuf::from(home).join(".netutils").join("plugins"))
-        })
-        .or_else(|| {
-            env::var_os("HOME").map(|home| PathBuf::from(home).join(".netutils").join("plugins"))
-        })
-        .unwrap_or_else(|| PathBuf::from(".netutils").join("plugins"))
 }
 
 fn plugin_root(name: &str) -> PathBuf {

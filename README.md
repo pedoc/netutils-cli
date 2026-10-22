@@ -42,6 +42,8 @@ A cross-platform command-line network diagnostic tool written in Rust. Covers ne
 | `completions` | Generate a shell completion script | `netutils completions bash > netutils.bash` |
 | `man` | Generate a roff man page on stdout | `netutils man > netutils.1` |
 
+The plugin examples show installation for core-only setups. With a [prebuilt bundle](#prebuilt-bundles) containing the discovery fix, skip the `netutils install` steps for bundled plugins.
+
 ### Installation
 
 ```bash
@@ -77,25 +79,57 @@ netutils-v<version>-<target>/
     ws/bin/netutils-websocket[.exe]
 ```
 
-Plugins run as separate child processes, so they only need to be discoverable. Point `NETUTILS_PLUGIN_DIR` at the bundled `plugins/` directory and every plugin subcommand works without installing anything:
+In builds containing the bundled-plugin discovery fix, fully extract the archive and run the core binary: it automatically finds `plugins/` beside the running executable. No `NETUTILS_PLUGIN_DIR` setting or plugin installation is needed. **Already-published v0.7.0 and earlier bundles do not support automatic discovery**; use the manual override below with those binaries.
+
+The examples use `vX.Y.Z` as a placeholder: replace it with a release containing this fix, not v0.7.0 or earlier. For macOS, use the `aarch64-apple-darwin` archive instead of the Linux archive shown here.
 
 ```bash
-# Linux / macOS
-tar xzf netutils-v0.6.0-x86_64-unknown-linux-gnu.tar.gz
-cd netutils-v0.6.0-x86_64-unknown-linux-gnu
-export NETUTILS_PLUGIN_DIR="$PWD/plugins"
-./netutils socks-probe 127.0.0.1:1080
+# Linux (replace vX.Y.Z before running)
+version=vX.Y.Z
+tar xzf "netutils-${version}-x86_64-unknown-linux-gnu.tar.gz"
+cd "netutils-${version}-x86_64-unknown-linux-gnu"
+./netutils plugin list
+./netutils mcp --help
 ```
 
 ```powershell
-# Windows
-Expand-Archive netutils-v0.6.0-x86_64-pc-windows-msvc.zip -DestinationPath .
-cd netutils-v0.6.0-x86_64-pc-windows-msvc
-$env:NETUTILS_PLUGIN_DIR = "$PWD\plugins"
-.\netutils.exe socks-probe 127.0.0.1:1080
+# Windows (replace vX.Y.Z before running)
+$version = "vX.Y.Z"
+Expand-Archive "netutils-${version}-x86_64-pc-windows-msvc.zip" -DestinationPath .
+cd "netutils-${version}-x86_64-pc-windows-msvc"
+.\netutils.exe plugin list
+.\netutils.exe mcp --help
 ```
 
-Without `NETUTILS_PLUGIN_DIR`, the plugin directory defaults to `%USERPROFILE%\.netutils\plugins` (`$HOME/.netutils/plugins` on Unix), which is where `netutils install` puts things. Bundled plugins carry no `plugin-lock.json`, so `netutils plugin list` reports their integrity as `unrecorded` — expected, since the archive checksum takes that role here.
+#### Plugin Directory Selection
+
+Builds containing this fix select one plugin root per invocation, in this order:
+
+1. Explicit `NETUTILS_PLUGIN_DIR`, used as supplied even when the directory does not yet exist.
+2. An existing `plugins/` directory beside the running executable. An empty directory qualifies; a regular file named `plugins` does not.
+3. The original user-default chain: `%USERPROFILE%\.netutils\plugins`, then `$HOME/.netutils/plugins`, then relative `.netutils/plugins` if neither variable is set.
+
+Automatic bundle discovery does not search the working directory or its ancestors. Keep the executable and `plugins/` together when moving a bundle; launching it from another directory or through `PATH` still uses the directory beside that executable.
+
+`netutils plugin dir` prints the selected root. Listing, directory-based dispatch, installation, updates, removal, and `plugin-lock.json` all use that same root. Roots are **not merged**: a missing plugin may fall back to the existing `PATH` lookup, but not to another plugin root. Plugins found only on `PATH` are outside that root's install/update/remove management.
+
+With the necessary read and execute permissions, a read-only bundle can still be listed and run. Core discovery, listing, and dispatch do not create directories or lock records; a plugin's own writes are separate. Management write errors are reported without silently switching to the user default. To manage plugins elsewhere, explicitly set `NETUTILS_PLUGIN_DIR` to a writable root; this selects a different root rather than copying or merging the bundled plugins.
+
+`NETUTILS_PLUGIN_DIR` remains an optional override in new builds. For **v0.7.0 and earlier**, it is still required to select the bundled plugins. From inside the extracted bundle directory:
+
+```bash
+# Linux / macOS: manual bundle selection, also supported by older binaries
+export NETUTILS_PLUGIN_DIR="$PWD/plugins"
+./netutils plugin dir
+```
+
+```powershell
+# Windows: manual bundle selection, also supported by older binaries
+$env:NETUTILS_PLUGIN_DIR = "$PWD\plugins"
+.\netutils.exe plugin dir
+```
+
+Bundled plugins carry no `plugin-lock.json`, so `plugin list` reports their integrity as `unrecorded`. Discovery does not create installation records or authenticate a plugin's publisher. Verify the archive's `.sha256` separately; it is not a per-plugin lock record.
 
 ### Quick Start
 
@@ -381,7 +415,7 @@ Common verdicts:
 
 Credentials are never echoed: the auth request appears as a length-only summary `<auth ver=01 user_len=N pass_len=M>` in both human and JSON output, and the password is never printed. Exit code `0` means the handshake (and optional CONNECT) succeeded, `1` means the probe completed with at least one failed phase, and `2` means a CLI usage error.
 
-Plugin management:
+Plugin management (see [Plugin Directory Selection](#plugin-directory-selection) for root precedence and read-only bundles):
 
 ```bash
 # Show known installable plugins and local install status
@@ -433,7 +467,7 @@ netutils plugin list
 
 `--version` pins the install. Without a pin, `install` takes the latest published version, so a compromised upstream release would be picked up automatically.
 
-`plugin list` reports an `Integrity` column by comparing the binary against the SHA-256 recorded at install time: `ok`, `changed`, `unrecorded` (the lock predates this field), `unreadable`, or `--` (not installed). This is trust-on-first-use — it detects drift after install, it does not authenticate the publisher.
+`plugin list` reports an `Integrity` column by comparing the binary against the SHA-256 recorded at install time: `ok`, `changed`, `unrecorded` (no recorded hash, including bundled plugins without a lock), `unreadable`, or `--` (not installed). This is trust-on-first-use — it detects drift after install, it does not authenticate the publisher.
 
 For accuracy: cargo already verifies the downloaded `.crate` against the checksum in the registry index, so the download itself was never unverified. The gaps addressed here are unconstrained versions, re-resolved dependencies, and no way to notice a binary changing after installation.
 

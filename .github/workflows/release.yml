@@ -106,7 +106,10 @@ jobs:
       #
       # 判断走 sparse index 而不是 `cargo info`：在 workspace 内 `cargo info`
       # 会优先匹配**本地**包，对未发布的版本同样返回 0，会导致永远跳过发布。
+      # 派生仓库也应通过验证并分发程序，但不能替上游发布同名 crate。
+      # 仅跳过 registry 上传，前面的格式、Clippy 和测试门禁仍全部执行。
       - name: Publish to crates.io
+        if: github.repository == 'dreamsxin/netutils-cli'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
@@ -143,16 +146,19 @@ jobs:
             echo "release ${tag} already exists"
             exit 0
           fi
-          notes="netutils ${tag} — 主程序与全部插件的预编译包。解压后把 NETUTILS_PLUGIN_DIR 指向包内 plugins/ 目录即可使用插件子命令。"
-          notes="${notes}"$'\n\n'"插件源码：dreamsxin/netutils-plugins@${{ needs.resolve.outputs.plugins_sha }}"
+          # 新正文随含自动发现修复的版本发布；上方跳过已存在的 Release，不改旧版承诺。
+          notes="netutils ${tag} — prebuilt bundles containing the core binary and all plugins. For releases containing the bundled-plugin discovery fix, fully extract the archive and run plugin subcommands directly; no cargo install or NETUTILS_PLUGIN_DIR setting is required. v0.7.0 and earlier binaries do not include this fix: point NETUTILS_PLUGIN_DIR at the extracted plugins/ directory when using those bundles, including bundles rebuilt from those older tags."
+          notes="${notes}"$'\n\n'"Automatic-discovery builds select a plugin root in this order: explicit NETUTILS_PLUGIN_DIR override, existing plugins/ beside the running executable, then the user default. One root is used for listing, directory-based execution, install, update, removal, and lock files; roots are not merged. Missing plugins may still run from PATH."
+          notes="${notes}"$'\n\n'"In automatic-discovery builds, read-only bundles can be listed and run with read and execute permissions. Management write errors do not redirect to the user default; set NETUTILS_PLUGIN_DIR to a writable root if needed. Bundled plugins without a lock remain unrecorded; discovery does not authenticate them."
+          notes="${notes}"$'\n\n'"Plugin source: dreamsxin/netutils-plugins@${{ needs.resolve.outputs.plugins_sha }}"
           # --verify-tag：宁可失败也不要凭空造一个标签出来
           gh release create "$tag" --draft --verify-tag --title "$tag" --notes "$notes"
 
   # 二进制分发：主程序 + 全部插件装进同一个归档。
   #
   # 插件是独立的子进程（`src/plugin.rs` 的 `installed_binary` / `find_in_path`），
-  # 不参与主程序链接，所以这里只要把它们按 `<plugins>/<插件名>/bin/<二进制名>`
-  # 摆好，解压后设置 NETUTILS_PLUGIN_DIR 就能被发现，无需 `cargo install`。
+  # 不参与主程序链接。保持 `<plugins>/<插件名>/bin/<二进制名>` 布局，主程序
+  # 即可从同级 plugins/ 自动发现，无需 `cargo install`；NETUTILS_PLUGIN_DIR 只作显式覆盖。
   bundle:
     needs: [resolve, create-release]
     permissions:

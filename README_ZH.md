@@ -42,6 +42,8 @@
 | `completions` | 生成 shell 补全脚本 | `netutils completions bash > netutils.bash` |
 | `man` | 生成 roff 格式 man page | `netutils man > netutils.1` |
 
+插件示例中的安装步骤适用于仅有核心程序的场景；使用包含自动发现修复的[预编译完整包](#预编译完整包)时，可跳过包内插件的 `netutils install` 步骤。
+
 ### 安装
 
 ```bash
@@ -51,6 +53,68 @@ cargo install netutils-cli
 # 安装后直接使用
 netutils --help
 ```
+
+### 预编译完整包
+
+GitHub Releases 为各平台提供包含主程序和全部插件的归档，无需 `cargo install`：
+
+- `netutils-v<version>-x86_64-unknown-linux-gnu.tar.gz`
+- `netutils-v<version>-aarch64-apple-darwin.tar.gz`
+- `netutils-v<version>-x86_64-pc-windows-msvc.zip`
+
+每个归档都有对应的 `.sha256` 文件，使用前请先校验。解压后主程序与 `plugins/` 同级，插件二进制位于 `plugins/<插件名>/bin/netutils-<插件名>[.exe]`；`ws` 目录同时包含 `netutils-ws` 和 `netutils-websocket`。
+
+包含包内插件自动发现修复的构建，完整解压后即可运行插件子命令，无需设置 `NETUTILS_PLUGIN_DIR` 或重新安装插件。**已发布的 v0.7.0 及更早版本不支持自动发现**，使用这些旧二进制时仍需下方的手工覆盖配置。
+
+下面的 `vX.Y.Z` 是占位符，运行前必须替换为包含此修复的发行版本，不能使用 v0.7.0 或更早版本。macOS 请将 Linux 归档和目录名中的目标替换为 `aarch64-apple-darwin`。
+
+```bash
+# Linux：运行前替换 vX.Y.Z
+version=vX.Y.Z
+tar xzf "netutils-${version}-x86_64-unknown-linux-gnu.tar.gz"
+cd "netutils-${version}-x86_64-unknown-linux-gnu"
+./netutils plugin list
+./netutils mcp --help
+```
+
+```powershell
+# Windows：运行前替换 vX.Y.Z
+$version = "vX.Y.Z"
+Expand-Archive "netutils-${version}-x86_64-pc-windows-msvc.zip" -DestinationPath .
+cd "netutils-${version}-x86_64-pc-windows-msvc"
+.\netutils.exe plugin list
+.\netutils.exe mcp --help
+```
+
+#### 插件目录选择
+
+包含此修复的构建每次调用只选择一个有效插件根，优先级如下：
+
+1. 显式设置的 `NETUTILS_PLUGIN_DIR`，原值直接使用，即使目录尚不存在。
+2. 正在运行的主程序同级、已经存在的 `plugins/` 目录。空目录也有效；同名普通文件无效。
+3. 原有用户默认链：先 `%USERPROFILE%\.netutils\plugins`，再 `$HOME/.netutils/plugins`；两者均未设置时使用相对路径 `.netutils/plugins`。
+
+包内目录的自动发现不搜索工作目录或其祖先目录。整体移动发行目录时，请让主程序和 `plugins/` 保持同级；从其他目录或通过 `PATH` 启动，仍使用该主程序旁的插件目录。
+
+`netutils plugin dir` 显示当前有效根。列举、从目录分派执行、安装、更新、删除和 `plugin-lock.json` 均使用同一个根。**不会合并多个根**：当前根缺少插件时，仅保留原有 `PATH` 执行回退，不再去另一个插件根查找；仅存在于 `PATH` 的插件也不纳入当前根的安装、更新或删除管理。
+
+具备读取和执行权限时，只读包仍可列举和运行。核心的发现、列举和分派不会创建目录或补写锁记录，插件自身的写操作不在此保证内。管理操作遇到写权限错误会明确报告，不会静默改写用户默认目录。需要在别处管理插件时，可显式将 `NETUTILS_PLUGIN_DIR` 指向可写根；这会切换根目录，不会复制或合并包内插件。
+
+在新构建中，`NETUTILS_PLUGIN_DIR` 是可选覆盖；**v0.7.0 及更早版本**要使用包内插件，仍须手工设置。在解压后的发行目录中执行：
+
+```bash
+# Linux / macOS：手工选中包内目录，也适用于旧版二进制
+export NETUTILS_PLUGIN_DIR="$PWD/plugins"
+./netutils plugin dir
+```
+
+```powershell
+# Windows：手工选中包内目录，也适用于旧版二进制
+$env:NETUTILS_PLUGIN_DIR = "$PWD\plugins"
+.\netutils.exe plugin dir
+```
+
+包内插件不附带 `plugin-lock.json`，因此 `plugin list` 的完整性状态仍为 `unrecorded`。自动发现不会生成安装记录，也不认证插件发布者；归档的 `.sha256` 应单独校验，不能当作逐插件的锁记录。
 
 ### 快速开始
 
@@ -391,7 +455,7 @@ netutils --json socks-probe 127.0.0.1:1080
 
 凭据永不回显：认证请求在人类和 JSON 输出里都只以长度摘要 `<auth ver=01 user_len=N pass_len=M>` 呈现，密码永远不打印。退出码 `0` 表示握手（及可选 CONNECT）成功，`1` 表示探测完成但有阶段失败，`2` 表示 CLI 用法错误。
 
-插件管理：
+插件管理（目录优先级和只读包说明见[插件目录选择](#插件目录选择)）：
 
 ```bash
 # 查询可安装的已知插件及本机安装状态
@@ -443,7 +507,7 @@ netutils plugin list
 
 `--version` 用于钉版本。不钉的话，`install` 取的是最新已发布版本——上游一旦发布被投毒的版本，会被直接装上。
 
-`plugin list` 的 `Integrity` 列把当前二进制与安装时记录的 SHA-256 对比：`ok`、`changed`、`unrecorded`（lock 早于该字段）、`unreadable`、`--`（未安装）。这是 trust-on-first-use：它能发现安装后的改动，但**不能**验证发布者身份。
+`plugin list` 的 `Integrity` 列把当前二进制与安装时记录的 SHA-256 对比：`ok`、`changed`、`unrecorded`（无已记录哈希，包括没有锁文件的包内插件）、`unreadable`、`--`（未安装）。这是 trust-on-first-use：它能发现安装后的改动，但**不能**验证发布者身份。
 
 需要说明准确的边界：cargo 本身会用注册表索引中的校验和验证下载的 `.crate`，下载环节从来不是"未校验"的。这次补的是版本不受约束、依赖每次重解析、以及安装后无法察觉二进制变化这三个缺口。
 
